@@ -8,7 +8,6 @@ import os
 import shutil
 import glob
 #shutil.rmtree('/folder_name')
-#if(os.path.exists(data_dir)) 
 from shutil import copyfile
 
 # For Spectro gram creation
@@ -20,105 +19,14 @@ from pylab import *
 import numpy as np
 
 # For Pytorch Inference
-import dl_utils 
+import dl_utils as du
+import preprocess_utils as pu
 
-
-
-VIDEO_SPLITTER = "/gpfs/gpfs_gl4_16mb/s4s004/vanstee/2019-03-dlspec/video-splitter/ffmpeg-split.py"
-inference_dict = {0:'Darth1secPNG', 1:'Luke1secPNG'}
 
 
 def nprint(mystring) :
     print("{} : {}".format(sys._getframe(1).f_code.co_name,mystring))
 
-def runcmd(mycmd) :
-    cmdary = re.split("\s+", mycmd)
-    nprint(cmdary)
-    process = subprocess.Popen(cmdary, stdout=subprocess.PIPE)
-    stdout, err = process.communicate()
-    # print(stdout)
-    return stdout
-
-# Takes an input video, and slices it up into png files of 1 sec
-def preprocess_video(input_video, output_directory, args) :
-    # only takes in mp4 for now ....
-    chop_video_extract_audio(input_video, output_directory, args.splitsize)
-    # This needs to be threaded !!!
-    create_spectrograms(output_directory)
-
-# writes large mp4 to 1 second mp4
-def chop_video_extract_audio(input_video, output_directory="tmp", splitsize=1) :
-    owd = os.getcwd()
-
-    input_video_ary = input_video.split("/")
-    file_name = input_video_ary[-1]
-    path = input_video_ary[0:-2]
-
-    #pdb.set_trace()
-
-    # create output dir if it doesnt exist
-    if(os.path.exists(output_directory)) :
-        nprint("Removing files -> {}".format(output_directory))
-        shutil.rmtree(output_directory)
-    
-    nprint("Creating output directory {}".format(output_directory))
-    os.mkdir(output_directory)
-
-
-    input_video_abs     = os.path.abspath(os.path.dirname(input_video)) + "/" + file_name
-    input_video_abs_new = os.path.abspath(os.path.dirname(input_video)) + "/" + output_directory + "/"+ file_name
-
-    nprint("Copy file {} to {}".format(input_video_abs, input_video_abs_new))
-    copyfile(input_video_abs, input_video_abs_new)
-
-  
-    nprint("original working directory = {}".format(owd))
-    mycmd = "python  {} -f {} -s {}".format(VIDEO_SPLITTER, input_video_abs_new,splitsize)
-    nprint("mycmd = {}".format(mycmd))
-
-    #pdb.set_trace()
-    a = runcmd(mycmd)
-
-    os.chdir(output_directory)
-    mp4_list = glob.glob("*-*-*-*.mp4")
-    for mp4 in mp4_list :
-        mycmd =  "ffmpeg -i {} {}".format(mp4, mp4.replace("mp4", "wav"))
-        a = runcmd(mycmd)
-    os.chdir(owd)
-
-    #convert_mp4_wav(indir,outdir)
-
-
-
-## Converts wav file to spectrogram png file  
-# This function is a bit expensive !!
-def create_spectrograms(wav_dir) :
-
-    os.chdir(wav_dir)
-    wav_list = glob.glob( '*.wav')
-    nprint("Processing {} wav files".format(len(wav_list)))
-    for wav in wav_list :
-        # Create the Spectrogram data structure
-        samplingFrequency, signalData = wavfile.read(wav)
-        if signalData.shape[-1] == len(signalData):
-            channels = 1
-        else:
-            channels = signalData.shape[1]
-        frequencies, times, spectrogram = signal.spectrogram(signalData, samplingFrequency)    
-
-
-        # Save as a png ....
-        #fig = plt.figure()
-        #specify channel number in second parameter below as in signalData[:,0] means channel 0
-        plt.specgram(signalData[:,0],Fs=samplingFrequency)
-        plt.axis('tight')
-        plt.axis('off')
-        #plt.show() 
-        png= wav.replace('wav','png')  
-        plt.savefig(png, dpi = 100, bbox_inches='tight')
-
-
-#
 ## function to process the inference data and write it to the video
 #annotate_video(video_in, inference_file, output_file)
 
@@ -197,24 +105,23 @@ def main():
     #args.input_video = "LukeClips.mp4"
     args.input_video = "vader_slice.mp4"
     args.splitsize   = 1
-    output_directory = "dvlk/"
+    output_directory = "./dvlk/"
     spectrogram_dir = "/gpfs/gpfs_gl4_16mb/s4s004/vanstee/2019-03-dlspec/" + output_directory
 
     output_file = "annotated_video.mp4"
-    model = "StarWars_Luke_Darth_Background_dv_ep50_tracc74.pt"
-    class_map = {'BackgroundPNG': 0, 'Darth1secPNG': 1, 'Luke1secPNG': 2}
-
+    model = "StarWars_Luke_Darth_Background_dv_ep13_acc90.pt"
+    
     for argk in vars(args) :
         nprint("{} -> {}".format(argk,vars(args)[argk]))
 
     # Cut the video into a bunch of spectrogram pngs ...
-    #preprocess_video(args.input_video, output_directory, args)
+    pu.preprocess_video(args.input_video, output_directory, args.splitsize)
     
     # This step runs inference, and returns a dictionary of spectrogram_png to class
-    annotations_dict = dl_utils.infer_spectrograms(model, spectrogram_dir, class_map, batch_size=16)
+    annotations_dict = du.infer_spectrograms(model, spectrogram_dir, batch_size=16)
     
     # Write the movie
-    dl_utils.annotate_video(args.input_video , args.splitsize, annotations_dict, output_directory, output_file)
+    du.annotate_video(args.input_video , args.splitsize, annotations_dict, output_directory, output_file)
 
 
 if __name__== "__main__":

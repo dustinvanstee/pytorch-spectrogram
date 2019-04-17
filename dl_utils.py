@@ -75,6 +75,8 @@ import cv2
 import paiv_utils.paiv_utils as pu
 import pdb
 import glob
+import re
+import subprocess
 
 print("PyTorch Version: ",torch.__version__)
 print("Torchvision Version: ",torchvision.__version__)
@@ -86,23 +88,31 @@ if __name__ == "__main__":
 def nprint(mystring) :
     print("{} : {}".format(sys._getframe(1).f_code.co_name,mystring))
 
+def runcmd(mycmd) :
+    cmdary = re.split("\s+", mycmd)
+    nprint(cmdary)
+    process = subprocess.Popen(cmdary, stdout=subprocess.PIPE)
+    stdout, err = process.communicate()
+    # print(stdout)
+    return stdout
+
 
 # Data augmentation and normalization for training
 # Just normalization for validation
 def get_transforms(input_size) :
     data_transforms = {
         'train': transforms.Compose([
-            transforms.Resize(input_size),
-            transforms.RandomResizedCrop(input_size),
-            transforms.RandomResizedCrop(input_size, scale=(1.0, 1.0)),
-            transforms.RandomHorizontalFlip(),
+            #transforms.Resize(input_size),
+            #transforms.RandomResizedCrop(input_size),
+            transforms.RandomResizedCrop(input_size, scale=(1.0, 1.0),ratio=(1.0, 1.0)),
+            #transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
         'val': transforms.Compose([
-            transforms.Resize(input_size),
-            transforms.CenterCrop(input_size),
-            transforms.RandomResizedCrop(input_size, scale=(1.0, 1.0)),        
+            #transforms.Resize(input_size),
+            #transforms.CenterCrop(input_size),
+            transforms.RandomResizedCrop(input_size, scale=(1.0, 1.0),ratio=(1.0, 1.0)),        
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
@@ -580,17 +590,15 @@ class ImageFolderWithPaths(datasets.ImageFolder):
 
 
 # This will return a dictionary of filenames -> className output
-def infer_spectrograms(model_path, spectrogram_dir, class_map, batch_size=1) : 
+def infer_spectrograms(model_path, spectrogram_dir, batch_size=1) : 
 
     nprint("Passed Parameters :")
     nprint("model_path      : {}".format(model_path))
     nprint("spectrogram_dir : {}".format(spectrogram_dir))
-    nprint("class_map       : {}".format(class_map))
+    #nprint("class_map       : {}".format(class_map))
     nprint("batch_size      : {}".format(batch_size))
 
-    inv_class_map = {v: k for k, v in class_map.items()}
-    nprint("Inverting class map for predictions to get mapped to class name")
-    nprint("inv_class_map       : {}".format(inv_class_map))
+
 
     #data_dir = "./tmp/"
     #data_dir = "./data/bananas_data"
@@ -599,10 +607,24 @@ def infer_spectrograms(model_path, spectrogram_dir, class_map, batch_size=1) :
     #model_name = "squeezenet"
     model_name = "inception"
     
+    # Load previously saved model data , not yet applied to model arch ...
+    saved_model = torch.load(model_path)
+    for i in saved_model.keys() :
+        nprint("Model keys = {}".format(i))
+
     # Number of classes in the dataset
-    #num_classes = 2
+    class_map = saved_model['classmap']
+    inv_class_map = {v: k for k, v in class_map.items()}
     num_classes = len(inv_class_map)
+
+    nprint("Inverting class map for predictions to get mapped to class name")
+    nprint("inv_class_map       : {}".format(inv_class_map))
     nprint("num_classes      : {}".format(num_classes))
+
+
+
+    
+
     
     # Flag for feature extracting. When False, we finetune the whole model, 
     #   when True we only update the reshaped layer params
@@ -625,19 +647,19 @@ def infer_spectrograms(model_path, spectrogram_dir, class_map, batch_size=1) :
     data_transforms = get_transforms(input_size)['val']
 
     # Print the model we just instantiated
-    nprint("Model {} loaded.  Num state_dict tensors = {}".format(model_name,len(list(inf_model_ft.state_dict()))))
+    nprint("Base model ({}) loaded (random parameters).  Num state_dict tensors = {}".format(model_name,len(list(inf_model_ft.state_dict()))))
     
     # Set to Inference mode
+    nprint("Now loading saved checkpoint parameters from {} {} ".format(os.getcwd(), model_path))
+
     inf_model_ft.eval()
-    saved_model = torch.load(model_path)
-    for i in saved_model.keys() :
-        nprint("Model keys = {}".format(i))
+
 
     # Load state_dict
     inf_model_ft.load_state_dict(saved_model['model_state_dict'])
     
     # Create Inference dataset
-    print("Initializing Datasets and Dataloaders...")
+    nprint("Initializing Datasets and Dataloaders...")
     # Create training and validation datasets
     # under tmp is infer/unknown/*pngs 
 
@@ -657,11 +679,9 @@ def infer_spectrograms(model_path, spectrogram_dir, class_map, batch_size=1) :
         print(outputs)
         npout = outputs.cpu().detach().numpy()
         preds = [inv_class_map[x] for x in npout]
-        # grab just the filename from the path
-        #print(paths)
+        
+        # Grab just the filenames ...
         fns = [x.split('/')[-1] for x in paths]
-        #print(fns)
-        #pdb.set_trace()
 
         # For each batch, just glue on the current list to overall filename -> pred 
         rv_list += list(zip(fns, preds))
@@ -696,16 +716,23 @@ def get_fn(filename, frame_number, fps, total_secs, split_size=1, extension="png
 
 
 def annotate_video(input_video, split_size, annotations_dict, output_directory, output_fn, sample_rate =1, max_frames=10000):
-    #paiv_colors = generate_colors()
 
+    #Error checking
     if(not(os.path.isfile(input_video))) :
         nprint("Error : Input File {} does not exist.  Check path".format(input_video))
         return 1;
+
+    if(re.search("mp4$", input_video) == None) :
+        nprint("Error : Input File {} must be of type mp4 (need to add support for other formats)".format(input_video))
+        return 1;
+
+
     print(input_video)
 
 
     loopcnt = 1 # loopcnt set to one since we read the first frame
     # Second Pass over video
+    spectrogram_dir = output_directory + "/infer/unknown/"
     nprint("Annotating {} and saving in {}".format(input_video, output_directory))
     cap  = cv2.VideoCapture(input_video)
     total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -736,16 +763,11 @@ def annotate_video(input_video, split_size, annotations_dict, output_directory, 
 
             file_name_idx = get_fn(input_video, loopcnt, fps, secs, split_size=1, extension="png") 
             classification = "fn = {}, val = {}".format(file_name_idx,annotations_dict[file_name_idx])
-            nprint(classification)
-
-            #for box in boxes :
-            #    color_dict[box.label] = paiv_colors[int(hashlib.md5(box.label.encode('utf-8')).hexdigest(), 16 ) % 6]
-            #    color = paiv_colors[int(hashlib.md5(box.label.encode('utf-8')).hexdigest(), 16 ) % 6]
-            #    frame = draw_annotated_box(frame, box, color)
-            #    #framep = paiv.draw_annotated_box(framep, box, color)
-            #frame = draw_counter_box(frame,'Running Counts', metric_dict, color_dict)
 
             frame = pu.draw_text_box(frame, "Classification : ", classification ) 
+            img_thumbnail = spectrogram_dir + file_name_idx
+            nprint("img_thumbnail = {}".format(img_thumbnail))
+            frame = pu.add_image_thumbnail(frame, img_thumbnail ) 
             output.write(frame)
             sample_rate_idx += 1
 
@@ -753,9 +775,21 @@ def annotate_video(input_video, split_size, annotations_dict, output_directory, 
 
         if(loopcnt % sample_rate == 0 ) :
             nprint("Complete {} frames".format(loopcnt))
-
     cap.release()
     output.release()
-    nprint("Program Complete : Wrote new movie : {}/{}".format(output_directory,output_fn))
+
+    fn= output_directory + "/" + output_fn
+    if(sample_rate == 1) :
+        nprint("Adding audio track back into annotated movie ")
+        nprint("1. Grab audio from original track and write to aac file")
+        runcmd("ffmpeg -loglevel panic -y -i {} {}".format(input_video,input_video.replace("mp4", "aac")))
+        fn_orig= fn
+        fn= output_directory + "/a_v_" + output_fn
+        nprint("2. Adding track onto annotated video")
+        runcmd("ffmpeg -loglevel panic -y -i {} -i {} -map 0:v -map 1:a -c copy -shortest {}".format(fn_orig,input_video.replace("mp4", "aac"),fn))
+    
+
+
+    nprint("Program Complete : Wrote new movie : {}".format(fn))
 
 

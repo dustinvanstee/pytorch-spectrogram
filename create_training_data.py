@@ -23,13 +23,6 @@ import numpy as np
 # For data processing !
 import preprocess_utils as pu
 
-# For Pytorch Inference
-import dl_utils as du
-
-
-VIDEO_SPLITTER = "/gpfs/gpfs_gl4_16mb/s4s004/vanstee/2019-03-dlspec/video-splitter/ffmpeg-split.py"
-inference_dict = {0:'Darth1secPNG', 1:'Luke1secPNG'}
-
 
 def nprint(mystring) :
     print("{} : {}".format(sys._getframe(1).f_code.co_name,mystring))
@@ -107,6 +100,95 @@ def _parser():
     return args
 
 
+# Directory Structure
+#(powerai-1.6.0) vanstee@p10a114:~/2019-03-dlspec/data/StarWars $ ls
+#01_rawVideo            03_labeledSplitVideos  05_train  06_infer            README.md
+#02_consolidatedVideos  04_labeledSplitPngs    05_val    old_remove_someday
+
+def create_training_data(args, delete_data=True, train_val_split=(0.7,0.3)) :
+    input_video_dir = args.input_video_dir 
+    splitsize       = args.splitsize
+    splitsize_dir   =  "1000ms"  
+    
+    run_preprocess_02_03 = True
+    run_copy_04          = True
+    run_split_05         = True
+
+    if(splitsize != 1) :
+        nprint("Error add logic for splitsize not equal to 1...")
+   
+    classes = glob.glob(input_video_dir + "02_consolidatedVideos/*")
+    # just grab the leaf directory as class label ..
+    classes = [x.split('/')[-1] for x in classes]
+    
+    # This part takes all the videos // splits them 
+    for label in classes :
+        # create output directory ...
+        lsv_dir = input_video_dir + "/03_labeledSplitVideos/" + splitsize_dir + "/" + label
+        lsp_dir = input_video_dir + "/04_labeledSplitPngs/" + splitsize_dir + "/" + label
+
+        if(not(os.path.exists(lsv_dir))) :
+            runcmd("mkdir -p {}".format(lsv_dir))
+        if(not(os.path.exists(lsp_dir))) :
+            runcmd("mkdir -p {}".format(lsp_dir))
+
+        # grab all the files in .... 02_consolidatedVideos
+        files_dir = input_video_dir + "/02_consolidatedVideos/" + label
+        files = glob.glob(files_dir + "/*")
+        for filename in files :
+            if(run_preprocess_02_03) :
+                pu.preprocess_video(filename, lsv_dir, splitsize, delete_data=delete_data)
+    
+    # Now cp from 03 to 04
+    if(run_copy_04 == True) :
+        for label in classes :
+            lsv_dir = input_video_dir + "/03_labeledSplitVideos/" + splitsize_dir + "/" + label
+            lsp_dir = input_video_dir + "/04_labeledSplitPngs/" + splitsize_dir + "/" + label
+           
+            glob_png = lsv_dir + "/*.png"
+            files_png =  glob.glob( glob_png)
+            for filename in files_png :
+                runcmd("cp {} {}".format(filename,lsp_dir))
+
+    # Now Random sample 04
+    if(run_split_05 == True) :
+        for label in classes :
+            lsp_dir = input_video_dir + "/04_labeledSplitPngs/" + splitsize_dir + "/" + label
+            train_dir = input_video_dir + "/05_train/" + splitsize_dir + "/" + label
+            val_dir = input_video_dir + "/05_val/" + splitsize_dir + "/" + label
+            if(not(os.path.exists(train_dir))) :
+                runcmd("mkdir -p {}".format(train_dir))
+            if(not(os.path.exists(val_dir))) :
+                runcmd("mkdir -p {}".format(val_dir))
+         
+            glob_png = lsp_dir + "/*.png"
+            files_png =  glob.glob( glob_png)
+            nf = len(files_png)
+
+
+            train_files_idx = np.random.choice(list(range(nf)), size=int(train_val_split[0]*nf), replace=False, p=None)
+            train_files_idx = sorted(train_files_idx)
+            for idx in range(nf) :
+                #nprint("{} {}".format(idx,train_files_idx[0]))
+                send_to_train = False
+                if(len(train_files_idx) > 0) :
+                    if(idx == train_files_idx[0]) :
+                        #move file to train
+                        send_to_train = True
+
+                if(send_to_train == True) :
+                    train_files_idx.pop(0)
+                    cmd = "file {} {} move to train".format(idx,files_png[idx])
+                    cmd = "cp {} {}".format(files_png[idx],train_dir)
+                    
+
+                else :
+                    #move file to val
+                    cmd = "file {} {} move to validation".format(idx,files_png[idx])
+                    cmd = "cp {} {}".format(files_png[idx],val_dir)
+                #nprint(cmd)
+                runcmd(cmd)
+
 
 def main():
     # Parse command line argument
@@ -115,26 +197,14 @@ def main():
     args = _parser()
     # --model_url='https://129.40.2.225/powerai-vision/api/dlapis/bda90858-45e4-4ca6-8161-7d63436bb6c6' --input_video="/data/work/osa/2018-10-PSEG/Videos/transmission\ tower\ detection\ demo.mp4" --output_directory="/data/work/osa/2018-10-PSEG/Videos/temp"
 
-    #def edit_video(input_video, model_url,output_directory, output_fn, overlay_fn, max_frames=50, force_refresh=True):
-
-    #print(args)
-    #args.force_refresh = True
-    # Force inputs for now ...
-    #args.input_video = "LukeClips.mp4"
-    args.input_video = "vader_slice.mp4"
+    args.input_video_dir = "/gpfs/gpfs_gl4_16mb/s4s004/vanstee/2019-03-dlspec/data/StarWars/"
     args.splitsize   = 1
-    output_directory = "dvlk/"
-    spectrogram_dir = "/gpfs/gpfs_gl4_16mb/s4s004/vanstee/2019-03-dlspec/" + output_directory
-
-    output_file = "annotated_video.mp4"
-    model = "StarWars_Luke_Darth_dv_ep25_acc78.pt"
-    class_map = { 0 : "Darth", 1 : "Luke"}
 
     for argk in vars(args) :
         nprint("{} -> {}".format(argk,vars(args)[argk]))
 
     # Cut the video into a bunch of spectrogram pngs ...
-    #preprocess_video(args.input_video, output_directory, args)
+    create_training_data(args)
     
  
 
