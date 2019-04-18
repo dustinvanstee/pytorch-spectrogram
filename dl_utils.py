@@ -675,16 +675,22 @@ def infer_spectrograms(model_path, spectrogram_dir, batch_size=1) :
         inputs = inputs.to(device)
         outputs = inf_model_ft(inputs)
         # Grab the best label
-        outputs = torch.argmax(outputs,1)
-        print(outputs)
-        npout = outputs.cpu().detach().numpy()
-        preds = [inv_class_map[x] for x in npout]
+        # pdb.set_trace()
+        probs = torch.softmax(outputs,1)
+        winner = torch.argmax(probs,1)
         
+        #print(outputs)
+        winner_np = winner.cpu().detach().numpy()
+        class_pred = [inv_class_map[x] for x in winner_np]
+        probs_np = probs.cpu().detach().numpy()
+        probs_dict = [ {inv_class_map[0] : x[0], inv_class_map[1] : x[1],inv_class_map[2] : x[2]} for x in probs_np]
         # Grab just the filenames ...
         fns = [x.split('/')[-1] for x in paths]
 
         # For each batch, just glue on the current list to overall filename -> pred 
-        rv_list += list(zip(fns, preds))
+        # this is not pretty, 0 -> class_pred, 1-> confidence_ary
+        prediction_conf_tuple = zip(class_pred, probs_dict)
+        rv_list += list(zip(fns, prediction_conf_tuple))
 
     nprint("Ran inference on {} files.  Here are the results".format(len(rv_list)))
     print(rv_list)
@@ -762,9 +768,17 @@ def annotate_video(input_video, split_size, annotations_dict, output_directory, 
             nprint("{} {} {}".format(loopcnt ,fps ,secs))
 
             file_name_idx = get_fn(input_video, loopcnt, fps, secs, split_size=1, extension="png") 
-            classification = "fn = {}, val = {}".format(file_name_idx,annotations_dict[file_name_idx])
+            (classification , confidence_dict) = annotations_dict[file_name_idx]
+            #nprint("confidence_dict = {}".format(confidence_dict))
+            print_str = []
+            print_str.append("Source PNG     : {}".format(file_name_idx))
+            print_str.append("Classification : {}".format(classification))
+            print_str.append("Confidence :")
+            for k in sorted(confidence_dict.keys()) :
+                print_str.append("  {0:<15s} : {1:.3f}".format(k, confidence_dict[k]))
+            #nprint(print_str)
 
-            frame = pu.draw_text_box(frame, "Classification : ", classification ) 
+            frame = pu.draw_text_box(frame, "Inference Results : ", print_str ) 
             img_thumbnail = spectrogram_dir + file_name_idx
             nprint("img_thumbnail = {}".format(img_thumbnail))
             frame = pu.add_image_thumbnail(frame, img_thumbnail ) 

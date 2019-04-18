@@ -34,8 +34,10 @@ def preprocess_video(input_video, output_directory, splitsize=1,  delete_data=Tr
     # only takes in mp4 for now ....
     chop_video_extract_audio(input_video, output_directory, splitsize, delete_data)
     # This needs to be threaded !!!
-    # create_spectrograms_mp(output_directory)
-    create_spectrograms_singlethreaded(output_directory)
+    create_spectrograms_mp(output_directory)
+    #create_spectrograms_singlethreaded(output_directory)
+    #create_spectrograms_threaded(output_directory) 
+
 
 # writes large mp4 to 1 second mp4
 def chop_video_extract_audio(input_video, output_directory="./tmp", splitsize=1, delete_data=True) :
@@ -202,4 +204,6 @@ def create_spectrograms_mp(wav_dir) :
     for i in range(len(wav_list)):
         p[i].join()
 
+    # Return back to orginal directory
+    os.chdir(orig_dir)
 
